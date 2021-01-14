@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 472ea6f69935841a90b015a51657c5a351cb4ffa78920bf23be17392c6cda531
+-- hash: 537b14b10a435118416ac6799e94b677c1f95c8198dffa2d92046d3b035325b5
 
 name:           OCovid
 version:        0.1.0.0
@@ -80,6 +80,7 @@ test-suite OCovid-test
       OCovid
     , base >=4.7 && <5
     , containers
+    , hspec
     , megaparsec
     , mtl
     , transformers

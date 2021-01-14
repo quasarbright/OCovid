@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 
 module OCovid.Static.Typing where
 
@@ -7,17 +8,37 @@ import OCovid.Util.UnionFind
 import Control.Monad.RWS.Strict
 import Control.Monad.Except
 
+import qualified Data.Set as Set
+import Data.Set(Set)
+
 import Data.Map(Map)
 import qualified Data.Map as Map
+import Control.Arrow ((>>>), second)
+
+import OCovid.Syntax.Expr
+import OCovid.Syntax.Program
+import Data.Function ((&))
+import Data.Functor (($>))
+
+-- types --
 
 data TypeError = Mismatch Type Type
                | OccursError String Type
+               | UnboundVar String
+               | InternalError String
                deriving(Eq, Ord, Show)
 
 type Store = (UnionFind Type, [String])
+
+emptyStore :: Store
+emptyStore = (mempty, names)
+
 type Env = Map String Scheme
 
-newtype TypeChecker a = TypeChecker { runTypeChecker :: ExceptT TypeError (RWS Env () Store) a }
+emptyEnv :: Env
+emptyEnv = mempty
+
+newtype Checker a = Checker { runChecker :: ExceptT TypeError (RWS Env () Store) a }
     deriving( Functor
             , Applicative
             , Monad
@@ -26,22 +47,28 @@ newtype TypeChecker a = TypeChecker { runTypeChecker :: ExceptT TypeError (RWS E
             , MonadError TypeError
             )
 
-getUF :: TypeChecker (UnionFind Type)
+-- utility --
+
+freeEnvVars :: Map String Scheme -> Set String
+freeEnvVars = Map.toList >>> fmap (snd >>> freeSchemeVars) >>> Set.unions
+
+getUF :: Checker (UnionFind Type)
 getUF = gets fst
 
-modUF :: (UnionFind Type -> UnionFind Type) -> TypeChecker ()
+modUF :: (UnionFind Type -> UnionFind Type) -> Checker ()
 modUF f = do
     (uf,ns) <- get
     put (f uf,ns)
 
-getNS :: TypeChecker [String]
+getNS :: Checker [String]
 getNS = gets snd
 
+modNS :: ([String] -> [String]) -> Checker ()
 modNS f = do
     (uf, ns) <- get
     put (uf, f ns)
 
-unify :: Type -> Type -> TypeChecker ()
+unify :: Type -> Type -> Checker ()
 unify t1 t2 = do
     uf <- getUF
     let t1' = find uf t1
@@ -54,10 +81,10 @@ unify t1 t2 = do
                 zipWithM_ unify ts1 ts2
             | otherwise -> throwError (Mismatch t1' t2')
         (TVar x, t)
-            | x `elem` freeVars (SMono t) -> throwError (OccursError x t)
+            | x `elem` freeMonoVars t -> throwError (OccursError x t)
             | otherwise -> modUF $ const (union uf t2' t1')
         (t, TVar x)
-            | x `elem` freeVars (SMono t) -> throwError (OccursError x t)
+            | x `elem` freeMonoVars t -> throwError (OccursError x t)
             | otherwise -> modUF $ const (union uf t1' t2')
         (TArr{}, _) -> throwError (Mismatch t1' t2')
         (TTuple{}, _) -> throwError (Mismatch t1' t2')
@@ -68,10 +95,116 @@ shortlex xs = [[x] | x <- xs] ++ [xs' ++ [x] | xs' <- shortlex xs, x <- xs]
 names :: [[Char]]
 names = shortlex ['a'..'z']
 
-freshName :: TypeChecker String
+freshName :: Checker String
 freshName = do
     ns <- getNS
     let n = head ns
     let ns' = tail ns
     modNS (const ns')
-    reutrn n
+    return n
+
+freshNames :: Integral a => a -> Checker [String]
+freshNames 0 = return []
+freshNames n = liftM2 (:) freshName (freshNames (pred n))
+
+lookupVar :: String -> Checker Scheme
+lookupVar x = do
+    mT <- asks (Map.lookup x)
+    case mT of
+        Nothing -> throwError (UnboundVar x)
+        Just t -> return t
+
+annot :: String -> Scheme -> Checker a -> Checker a
+annot x t = local (Map.insert x t)
+
+annots :: [(String, Scheme)] -> Checker a -> Checker a
+annots vars = local $ \m -> foldr (uncurry Map.insert) m vars
+
+findMono :: Type -> Checker Type
+findMono t = case t of
+    TVar{} -> do
+        uf <- getUF
+        return (find uf t)
+    TArr arg ret -> TArr <$> findMono arg <*> findMono ret
+    TTuple ts -> TTuple <$> mapM findMono ts
+        
+simplifyMono :: Type -> Type
+simplifyMono t =
+    let frees = freeMonoVarsOrdered t
+        replacements = zip frees (fmap TVar names)
+    in subs subMono replacements t
+
+finalizeScheme :: Scheme -> Checker Scheme
+finalizeScheme = instantiate >=> finalizeMono
+
+finalizeMono :: Type -> Checker Scheme
+finalizeMono = findMono >=> (return . simplifyMono) >=> generalize
+
+--assertEqual :: Type -> Type -> Checker ()
+--assertEqual t t' = unless (t == t') (throwError (Mismatch t t'))
+
+-- inference --
+
+-- | make a mono type of a scheme using fresh type variables
+instantiate :: Scheme -> Checker Type
+instantiate = \case
+    SForall x t -> do
+        x' <- freshName
+        instantiate (subScheme x (TVar x') t)
+    SMono t -> do
+        return t
+
+-- | make a scheme of a mono type by escaping free type variables
+generalize :: Type -> Checker Scheme
+generalize t = do
+    envFrees <- asks freeEnvVars
+    let monoFrees = freeMonoVars t
+        frees = Set.union envFrees monoFrees & Set.toList
+    return (foldr SForall (SMono t) frees)
+
+inferExpr :: Expr -> Checker Type
+inferExpr = \case
+    Var x -> instantiate =<< lookupVar x
+    App f x -> do
+        arg <- fmap TVar freshName
+        ret <- fmap TVar freshName
+        checkExpr (TArr arg ret) f
+        checkExpr arg x
+        return ret
+    Tuple es -> TTuple <$> mapM inferExpr es
+    Fun args body -> do
+        taus <- freshNames (length args)
+        let argSchemes = SMono . TVar <$> taus
+        tBody <- annots (zip args argSchemes) (inferExpr body)
+        return $ foldr TArr tBody (fmap TVar taus)
+    Let x rhs body -> do
+        tRhs <- inferExpr rhs
+        tRhs' <- generalize tRhs
+        annot x tRhs' (inferExpr body)
+    Match{} -> undefined
+
+checkExpr :: Type -> Expr -> Checker ()
+checkExpr t e = unify t =<< inferExpr e
+
+-- | type check the program and return the mapping from names to types of
+-- top level variables
+checkProgram :: Program -> Checker Env
+checkProgram (Program bindings) = go bindings
+    where
+        go [] = ask
+        go ((x,rhs):rest) = do
+            tRhs <- inferExpr rhs
+            tRhs' <- finalizeScheme =<< generalize tRhs
+            annot x tRhs' (go rest)
+
+-- running the monads --
+
+executeChecker :: Checker a -> Either TypeError a
+executeChecker =
+    runChecker
+    >>> runExceptT
+    >>> (\m -> runRWS m emptyEnv emptyStore)
+    >>> (\(a,_,_) -> a)
+
+inferAndFinalizeExpr :: Expr -> Either TypeError Type
+inferAndFinalizeExpr e = executeChecker (inferExpr e >>= finalizeMono >>= (return . blindInstantiate))

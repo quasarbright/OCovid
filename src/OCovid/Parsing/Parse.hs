@@ -72,7 +72,6 @@ pExpr = choice
     [ pLet <?> "let binding"
     , pMatch <?> "match expression"
     , pFun <?> "function expression"
-    , pAtom
     , pApp pAtom <?> "function application"
     ]
 
@@ -105,8 +104,11 @@ fixLeft m = case m of
     Left e -> Left $ errorBundlePretty e
     Right a -> Right a
 
-parseProgram :: String -> String -> Either String Program
-parseProgram name src = fixLeft $ runParser pProgram name src
+makeParseFn :: Parser b -> String -> String -> Either String b
+makeParseFn p name src = fixLeft $ runParser (scn *> p <* eof) name src
 
-parseExpr :: String -> Either String Expr
-parseExpr src = fixLeft $ runParser pExpr "" src
+parseProgram :: String -> String -> Either String Program
+parseProgram = makeParseFn pProgram
+
+parseExpr :: String -> String -> Either String Expr
+parseExpr = makeParseFn pExpr

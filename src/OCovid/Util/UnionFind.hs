@@ -8,7 +8,7 @@ type UnionFind a = Map a a
 
 find :: Ord t => UnionFind t -> t -> t
 find m k
-    | k `notElem` m = k
+    | not $ k `Map.member` m = k
     | Map.lookup k m == Just k = k
     | otherwise = find m (Maybe.fromJust (Map.lookup k m))
     
