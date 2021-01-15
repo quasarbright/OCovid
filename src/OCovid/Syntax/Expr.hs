@@ -2,8 +2,6 @@
 
 module OCovid.Syntax.Expr where
 
-import OCovid.Syntax.Pattern
-
 data Expr = Var String
           | App Expr Expr
           | Tuple [Expr]

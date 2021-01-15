@@ -1,1 +1,0 @@
-module OCovid.Syntax.Pattern where

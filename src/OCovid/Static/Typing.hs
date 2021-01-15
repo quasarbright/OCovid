@@ -14,12 +14,11 @@ import Data.Set(Set)
 
 import Data.Map(Map)
 import qualified Data.Map as Map
-import Control.Arrow ((>>>), second)
+import Control.Arrow ((>>>))
 
 import OCovid.Syntax.Expr
 import OCovid.Syntax.Program
 import Data.Function ((&))
-import Data.Functor (($>))
 
 -- types --
 
@@ -168,7 +167,8 @@ instantiate = \case
 
 -- | make a scheme of a mono type by escaping free type variables
 generalize :: Type -> Checker Scheme
-generalize t = do
+generalize t_ = do
+    t <- findMono t_
     envFrees <- asks freeEnvVars
     let monoFrees = freeMonoVars t
         frees = monoFrees `Set.difference` envFrees & Set.toList
@@ -197,9 +197,7 @@ inferExpr = \case
         tE <- inferExpr e
         ts <- mapM (uncurry (inferMatchCase tE)) cases
         zipWithM_ unify ts (tail ts)
-        env <- ask
-        uf <- getUF
-        env `seq` uf `seq` return $ head ts
+        return $ head ts
 
 checkExpr :: Type -> Expr -> Checker ()
 checkExpr t e = unify t =<< inferExpr e
@@ -209,9 +207,7 @@ inferMatchCase t p rhs = do
     vars <- checkPattern t p
     let varsPairs = Map.toList vars
     varsPairsGen <- mapM (\(x,t') -> (x,) <$> (SMono <$> findMono t')) varsPairs
-    env <- ask -- debug
-    uf <- getUF -- debug
-    env `seq` uf `seq` annots varsPairsGen (inferExpr rhs)
+    annots varsPairsGen (inferExpr rhs)
 
 checkPattern :: Type -> Pattern -> Checker (Map String Type)
 checkPattern t = \case
@@ -220,9 +216,7 @@ checkPattern t = \case
         ts <- fmap TVar <$> freshNames (length ps)
         let t' = TTuple ts
         unify t t'
-        uf <- getUF -- debug
-        env <- ask -- debug
-        maps <- env `seq` uf `seq` zipWithM checkPattern ts ps
+        maps <- zipWithM checkPattern ts ps
         return $ Map.unions maps
 
 
@@ -249,7 +243,8 @@ executeChecker =
 inferAndFinalizeExpr :: Expr -> Either TypeError Type
 inferAndFinalizeExpr e = executeChecker (inferExpr e >>= finalizeMono >>= (return . blindInstantiate))
 
-goo :: () -> Either TypeError Type
-goo () = inferAndFinalizeExpr e
--- fun t -> match t with | (x,y) -> x
-    where e = Fun ["t"] (Match (Var "t") [(PTuple [PVar "x",PVar "y"],Var "x")])
+--goo :: () -> Either TypeError Type
+--goo () = executeChecker (inferExpr e >>= findMono)
+---- "let fst = fun t -> match t with | (x,y) -> x in fst ((), ((), ()))"
+--    where e = Let "fst" (Fun ["t"] (Match (Var "t") [(PTuple [PVar "x",PVar "y"],Var "x")])) (App (Var "fst") (Tuple [Tuple [Tuple [], Tuple[]], Tuple []]))
+----    where e = (Fun ["t"] (Match (Var "t") [(PTuple [PVar "x",PVar "y"],Var "x")]))

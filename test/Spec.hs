@@ -44,3 +44,6 @@ main = hspec $ do
             inferExprString "match ((), ((), ())) with | (x,(y,z)) -> y" `shouldBe` Right tunit
             inferExprString "match ((), ((), ())) with | (x,(y,z)) -> z" `shouldBe` Right tunit
             inferExprString "fun t -> match t with | (x,y) -> x" `shouldBe` Right (ttuple [tvar "a", tvar "b"] \-> tvar "a")
+            inferExprString "let fst = fun t -> match t with | (x,y) -> x in fst" `shouldBe` Right (ttuple [tvar "a", tvar "b"] \-> tvar "a")
+            inferExprString "let fst = fun t -> match t with | (x,y) -> x in fst ((), ((), ()))" `shouldBe` Right tunit
+            inferExprString "let fst = fun t -> match t with | (x,y) -> x in fst (fst (((), ()), ()))" `shouldBe` Right tunit

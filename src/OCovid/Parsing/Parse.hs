@@ -1,13 +1,9 @@
 module OCovid.Parsing.Parse where
 
-import Data.Void
 import Text.Megaparsec
-import qualified Text.Megaparsec.Char.Lexer as L
-import Text.Megaparsec.Error
 
 import OCovid.Parsing.ParseUtils
 import OCovid.Syntax.Expr
-import OCovid.Syntax.Pattern
 import OCovid.Syntax.Program
 import Control.Monad (void)
 
