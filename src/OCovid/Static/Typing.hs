@@ -127,7 +127,8 @@ findMono :: Type -> Checker Type
 findMono t = case t of
     TVar{} -> do
         uf <- getUF
-        return (find uf t)
+        let t' = find uf t
+        if t == t' then return t' else findMono t'
     TArr arg ret -> TArr <$> findMono arg <*> findMono ret
     TTuple ts -> TTuple <$> mapM findMono ts
 
@@ -236,6 +237,13 @@ executeChecker =
     >>> runExceptT
     >>> (\m -> runRWS m emptyEnv emptyStore)
     >>> (\(a,_,_) -> a)
+
+executeChecker_ :: Checker a -> (Either TypeError a, UnionFind Type)
+executeChecker_ =
+    runChecker
+    >>> runExceptT
+    >>> (\m -> runRWS m emptyEnv emptyStore)
+    >>> (\(a,(uf,_),_) -> (a,uf))
 
 inferAndFinalizeExpr :: Expr -> Either TypeError Type
 inferAndFinalizeExpr e = executeChecker (inferExpr e >>= finalizeMono >>= (return . blindInstantiate))

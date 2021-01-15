@@ -25,6 +25,7 @@ main = hspec $ do
             inferExprString "fun x -> x" `shouldBe` Right (tvar "a" \-> tvar "a")
             inferExprString "fun x -> ()" `shouldBe` Right (tvar "a" \-> tunit)
             inferExprString "fun x y -> x" `shouldBe` Right (tvar "a" \-> tvar "b" \-> tvar "a")
+            inferExprString "fun f g x -> f (g x)" `shouldBe` Right ((tvar "a" \-> tvar "b") \-> (tvar "c" \-> tvar "a") \-> tvar "c" \-> tvar "b")
         it "infers function application" $ do
             inferExprString "(fun x -> x) ()" `shouldBe` Right tunit
             inferExprString "(fun x -> ()) ((),())" `shouldBe` Right tunit
