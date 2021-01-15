@@ -25,7 +25,32 @@ main = hspec $ do
             inferExprString "fun x -> x" `shouldBe` Right (tvar "a" \-> tvar "a")
             inferExprString "fun x -> ()" `shouldBe` Right (tvar "a" \-> tunit)
             inferExprString "fun x y -> x" `shouldBe` Right (tvar "a" \-> tvar "b" \-> tvar "a")
+            -- assoc
+            inferExprString "fun t -> match t with | ((x,y),z) -> (x,(y,z))" `shouldBe` Right (ttuple [ttuple [tvar "a", tvar "b"], tvar "c"] \-> ttuple [tvar "a", ttuple [tvar "b", tvar "c"]])
+        it "infers higher order function types" $ do
+            -- .
             inferExprString "fun f g x -> f (g x)" `shouldBe` Right ((tvar "a" \-> tvar "b") \-> (tvar "c" \-> tvar "a") \-> tvar "c" \-> tvar "b")
+            -- $
+            inferExprString "fun f x -> f x" `shouldBe` Right ((tvar "a" \-> tvar "b") \-> tvar "a" \-> tvar "b")
+            -- &
+            inferExprString "fun x f -> f x" `shouldBe` Right (tvar "a" \-> (tvar "a" \-> tvar "b") \-> tvar "b")
+            -- const
+            inferExprString "fun a b -> a" `shouldBe` Right (tvar "a" \-> tvar "b" \-> tvar "a")
+            inferExprString "(fun a b -> a) ()" `shouldBe` Right (tvar "a" \-> tunit)
+            -- flip
+            inferExprString "fun f x y -> f y x" `shouldBe` Right ((tvar "a" \-> tvar "b" \-> tvar "c") \-> tvar "b" \-> tvar "a" \-> tvar "c")
+            -- curry
+            inferExprString "fun f x y -> f (x,y)" `shouldBe` Right ((ttuple [tvar "a", tvar "b"] \-> tvar "c") \-> tvar "a" \-> tvar "b" \-> tvar "c")
+            -- uncurry
+            inferExprString "fun f xy -> match xy with | (x,y) -> f x y" `shouldBe` Right ((tvar "a" \-> tvar "b" \-> tvar "c") \-> ttuple [tvar "a", tvar "b"] \-> tvar "c")
+            --- ***
+            inferExprString "fun f g xy -> match xy with | (x,y) -> (f x, g y)" `shouldBe` Right ((tvar "a" \-> tvar "b") \-> (tvar "c" \-> tvar "d") \-> ttuple [tvar "a", tvar "c"] \-> ttuple [tvar "b", tvar "d"])
+            -- &&&
+            inferExprString "fun f g x -> (f x, g x)" `shouldBe` Right ((tvar "a" \-> tvar "b") \-> (tvar "a" \-> tvar "c") \-> tvar "a" \-> ttuple [tvar "b", tvar "c"])
+            -- first
+            inferExprString "fun f xy -> match xy with | (x,y) -> (f x, y)" `shouldBe` Right ((tvar "a" \-> tvar "b") \-> ttuple [tvar "a", tvar "c"] \-> ttuple [tvar "b", tvar "c"])
+            -- second
+            inferExprString "fun f xy -> match xy with | (x,y) -> (x, f y)" `shouldBe` Right ((tvar "a" \-> tvar "b") \-> ttuple [tvar "c", tvar "a"] \-> ttuple [tvar "c", tvar "b"])
         it "infers function application" $ do
             inferExprString "(fun x -> x) ()" `shouldBe` Right tunit
             inferExprString "(fun x -> ()) ((),())" `shouldBe` Right tunit
@@ -48,3 +73,5 @@ main = hspec $ do
             inferExprString "let fst = fun t -> match t with | (x,y) -> x in fst" `shouldBe` Right (ttuple [tvar "a", tvar "b"] \-> tvar "a")
             inferExprString "let fst = fun t -> match t with | (x,y) -> x in fst ((), ((), ()))" `shouldBe` Right tunit
             inferExprString "let fst = fun t -> match t with | (x,y) -> x in fst (fst (((), ()), ()))" `shouldBe` Right tunit
+
+(***) f g (x,y) = (f x,  g y)
