@@ -73,5 +73,3 @@ main = hspec $ do
             inferExprString "let fst = fun t -> match t with | (x,y) -> x in fst" `shouldBe` Right (ttuple [tvar "a", tvar "b"] \-> tvar "a")
             inferExprString "let fst = fun t -> match t with | (x,y) -> x in fst ((), ((), ()))" `shouldBe` Right tunit
             inferExprString "let fst = fun t -> match t with | (x,y) -> x in fst (fst (((), ()), ()))" `shouldBe` Right tunit
-
-(***) f g (x,y) = (f x,  g y)
