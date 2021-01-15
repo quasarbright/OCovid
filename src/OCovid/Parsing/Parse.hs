@@ -1,13 +1,18 @@
 module OCovid.Parsing.Parse where
 
 import Text.Megaparsec
+import Text.Megaparsec.Char
 
 import OCovid.Parsing.ParseUtils
 import OCovid.Syntax.Expr
+import OCovid.Static.Types
 import OCovid.Syntax.Program
 import Control.Monad (void)
+import Data.Functor (($>))
 
 type ExprParser = Parser Expr -> Parser Expr
+
+-- exprs --
 
 pVar :: Parser Expr
 pVar = Var <$> identifier
@@ -71,6 +76,8 @@ pExpr = choice
     , pApp pAtom <?> "function application"
     ]
 
+-- patterns --
+
 -- also normal paren
 pPTuple :: Parser Pattern
 pPTuple = do
@@ -84,6 +91,45 @@ pPTuple = do
 pPattern :: Parser Pattern
 pPattern =  PVar <$> identifier
         <|> pPTuple
+
+-- types --
+
+pTArr :: Parser Type
+pTArr = do
+    ts <- pTTuple `sepBy1` symbol "->"
+    case ts of
+        [t] -> return t
+        _ -> return $ foldr1 TArr ts
+
+pTTuple :: Parser Type
+pTTuple = do
+    ts <- pTCon `sepBy1` symbol "*"
+    case ts of
+        [t] -> return t
+        _ -> return $ TTuple ts
+
+pTCon :: Parser Type
+pTCon =
+    let pArgs = try (fmap (:[]) pTAtom) <|> parens (pType `sepBy1` symbol ",")
+        p = do
+            args <- pArgs
+            name <- identifier
+            return $ TCon name args
+    in try p <|> pTAtom
+
+pTAtom :: Parser Type
+pTAtom = choice [parens pType, pTVar, pTUnit]
+
+pTVar :: Parser Type
+pTVar = string "'" *> fmap TVar identifier
+
+pTUnit :: Parser Type
+pTUnit = pKeyword "unit" $> TTuple []
+
+pType :: Parser Type
+pType = pTArr
+
+-- programs --
 
 pProgram :: Parser Program
 pProgram = Program <$> many bind

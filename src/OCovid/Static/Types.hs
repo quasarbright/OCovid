@@ -8,7 +8,9 @@ import Data.Set(Set)
 
 data Type = TVar String
           | TArr Type Type
-          | TTuple [Type] deriving (Eq, Ord)
+          | TTuple [Type]
+          | TCon String [Type]
+          deriving (Eq, Ord)
 
 tunit :: Type
 tunit = TTuple []
@@ -24,10 +26,12 @@ ttuple :: [Type] -> Type
 ttuple = TTuple
 
 instance Show Type where
-    show (TVar x) = x
+    show (TVar x) = "'"++x
     show (TArr arg ret) = "("++show arg++"->"++show ret++")"
     show (TTuple []) = "unit"
     show (TTuple ts) = "("++intercalate " * " (show <$> ts)++")"
+    show (TCon name [arg]) = show arg ++ " " ++ name
+    show (TCon name args) = "("++intercalate ", " (show <$> args)++") "++name
 
 data Scheme = SForall String Scheme
             | SMono Type
@@ -35,23 +39,21 @@ data Scheme = SForall String Scheme
 
 freeSchemeVars :: Scheme -> Set String
 freeSchemeVars (SForall x t) = Set.delete x $ freeSchemeVars t
-freeSchemeVars (SMono t') = go t'
-    where go t = case t of
-                    TVar x -> Set.singleton x
-                    TArr arg ret -> go arg `Set.union` go ret
-                    TTuple ts -> Set.unions (fmap go ts)
+freeSchemeVars (SMono t) = freeMonoVars t
 
 freeMonoVars :: Type -> Set String
 freeMonoVars = \case
     TVar x -> Set.singleton x
     TArr arg ret -> freeMonoVars arg `Set.union` freeMonoVars ret
     TTuple ts -> Set.unions (fmap freeMonoVars ts)
+    TCon _ args -> Set.unions (fmap freeMonoVars args)
 
 freeMonoVarsOrdered :: Type -> [String]
 freeMonoVarsOrdered = \case
     TVar x -> [x]
     TArr arg ret -> nub (freeMonoVarsOrdered arg++freeMonoVarsOrdered ret)
-    TTuple ts -> nub (concat (freeMonoVarsOrdered <$> ts))
+    TTuple ts -> nub (freeMonoVarsOrdered =<< ts)
+    TCon _ args -> nub (freeMonoVarsOrdered =<< args)
     
 
 subMono :: String -> Type -> Type -> Type
@@ -60,6 +62,7 @@ subMono target replacement = let go = subMono target replacement in \case
            | otherwise -> TVar x
     TArr arg ret -> TArr (go arg) (go ret)
     TTuple ts -> TTuple (fmap go ts)
+    TCon name args -> TCon name (fmap go args)
 
 subScheme :: String -> Type -> Scheme -> Scheme
 subScheme target replacement = let go = subScheme target replacement in \case

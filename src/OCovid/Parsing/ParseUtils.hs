@@ -7,6 +7,7 @@ import Text.Megaparsec
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 import qualified Text.Megaparsec.Debug as DBG
+import Data.Char (isUpper, isLower)
 
 type Parser = Parsec Void String
 
@@ -46,16 +47,22 @@ pReservedOpWith :: Parser () -> String -> Parser ()
 pReservedOpWith sc' name = void . L.lexeme sc' $ (string name <* notFollowedBy opLetter)
 
 reservedWords :: [String]
-reservedWords = words "let in rec match with fun if then else"
+reservedWords = words "let in rec match with fun if then else unit"
 
 --reservedOps :: [String]
 --reservedOps = words "+ - * & / ! || && | \" ' : ; % ^"
 
 identStart :: Parser Char
-identStart = letterChar <|> char '_'
+identStart = satisfy isLower <|> char '_'
+
+upperIdentStart :: Parser Char
+upperIdentStart = satisfy isUpper
 
 identLetter :: Parser Char
-identLetter = identStart <|> numberChar
+identLetter = identStart <|> numberChar <|> char '\''
+
+upperIdentLetter :: Parser Char
+upperIdentLetter = upperIdentStart <|> numberChar <|> oneOf "'_"
 
 identifier :: Parser String
 identifier = (lexeme . try) (p >>= check)
@@ -65,6 +72,15 @@ identifier = (lexeme . try) (p >>= check)
      if x `elem` reservedWords
      then fail $ "keyword " ++ show x ++ " cannot be an identifier"
      else return x
+
+upperIdentifier :: Parser String
+upperIdentifier = (lexeme . try) (p >>= check)
+    where
+    p = (:) <$> upperIdentStart <*> many upperIdentLetter
+    check x =
+        if x `elem` reservedWords
+        then fail $ "keyword " ++ show x ++ " cannot be an identifier"
+        else return x
 
 opLetter :: Parser Char
 opLetter = oneOf "\\|/-+=!@#$%^&*~.?<>"
@@ -105,6 +121,15 @@ combineSS a b = (fst a, snd b)
 -- | optional with backtracking
 vot :: Parser () -> Parser ()
 vot = void . try . optional
+
+parens :: Parser a -> Parser a
+parens = between (symbol "(") (symbol ")")
+
+brackets :: Parser a -> Parser a
+brackets = between (symbol "[") (symbol "]")
+
+braces :: Parser a -> Parser a
+braces = between (symbol "{") (symbol "}")
 
 -- | copied from the parsec package:
 -- https://hackage.haskell.org/package/parsec-3.1.14.0/docs/src/Text.Parsec.Combinator.html#chainl1

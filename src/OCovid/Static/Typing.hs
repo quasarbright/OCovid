@@ -77,9 +77,9 @@ unify t1 t2 = do
         (TArr arg1 ret1, TArr arg2 ret2) ->
             zipWithM_ unify [arg1, ret1] [arg2, ret2]
         (TTuple ts1, TTuple ts2)
-            | length ts1 == length ts2 ->
-                zipWithM_ unify ts1 ts2
-            | otherwise -> throwError (Mismatch t1' t2')
+            | length ts1 == length ts2 -> zipWithM_ unify ts1 ts2
+        (TCon name args, TCon name' args')
+            | (name,length args) == (name', length args') -> zipWithM_ unify args args'
         (TVar x, t)
             | x `elem` freeMonoVars t -> throwError (OccursError x t)
             | otherwise -> modUF $ const (union uf t2' t1')
@@ -88,6 +88,7 @@ unify t1 t2 = do
             | otherwise -> modUF $ const (union uf t1' t2')
         (TArr{}, _) -> throwError (Mismatch t1' t2')
         (TTuple{}, _) -> throwError (Mismatch t1' t2')
+        (TCon{}, _) -> throwError (Mismatch t1' t2')
 
 shortlex :: [a] -> [[a]]
 shortlex xs = [[x] | x <- xs] ++ [xs' ++ [x] | xs' <- shortlex xs, x <- xs]
@@ -131,6 +132,7 @@ findMono t = case t of
         if t == t' then return t' else findMono t'
     TArr arg ret -> TArr <$> findMono arg <*> findMono ret
     TTuple ts -> TTuple <$> mapM findMono ts
+    TCon name args -> TCon name <$> mapM findMono args
 
 -- | simplify the type variables so gd -> ddf appears as a -> b
 simplifyMono :: Type -> Type
