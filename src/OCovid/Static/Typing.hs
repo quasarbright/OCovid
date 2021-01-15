@@ -151,9 +151,6 @@ finalizeScheme = instantiate >=> finalizeMono
 finalizeMono :: Type -> Checker Scheme
 finalizeMono = findMono >=> (return . simplifyMono) >=> (return . blindGeneralize)
 
---assertEqual :: Type -> Type -> Checker ()
---assertEqual t t' = unless (t == t') (throwError (Mismatch t t'))
-
 -- inference --
 
 -- | make a mono type of a scheme using fresh type variables
@@ -242,9 +239,3 @@ executeChecker =
 
 inferAndFinalizeExpr :: Expr -> Either TypeError Type
 inferAndFinalizeExpr e = executeChecker (inferExpr e >>= finalizeMono >>= (return . blindInstantiate))
-
---goo :: () -> Either TypeError Type
---goo () = executeChecker (inferExpr e >>= findMono)
----- "let fst = fun t -> match t with | (x,y) -> x in fst ((), ((), ()))"
---    where e = Let "fst" (Fun ["t"] (Match (Var "t") [(PTuple [PVar "x",PVar "y"],Var "x")])) (App (Var "fst") (Tuple [Tuple [Tuple [], Tuple[]], Tuple []]))
-----    where e = (Fun ["t"] (Match (Var "t") [(PTuple [PVar "x",PVar "y"],Var "x")]))
