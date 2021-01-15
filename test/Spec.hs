@@ -24,6 +24,7 @@ main = hspec $ do
         it "infers function types" $ do
             inferExprString "fun x -> x" `shouldBe` Right (tvar "a" \-> tvar "a")
             inferExprString "fun x -> ()" `shouldBe` Right (tvar "a" \-> tunit)
+            inferExprString "fun x y -> x" `shouldBe` Right (tvar "a" \-> tvar "b" \-> tvar "a")
         it "infers function application" $ do
             inferExprString "(fun x -> x) ()" `shouldBe` Right tunit
             inferExprString "(fun x -> ()) ((),())" `shouldBe` Right tunit
@@ -35,3 +36,11 @@ main = hspec $ do
             inferExprString "let id = (fun x -> x) in (id id) ()" `shouldBe` Right tunit
         it "prevents calling non-functions" $ do
             inferExprString "() ()" `shouldBe` Left (Mismatch (tvar "a" \-> tvar "b") tunit)
+        it "handles matches" $ do
+            inferExprString "match () with | x -> x" `shouldBe` Right tunit
+            inferExprString "match () with | () -> ()" `shouldBe` Right tunit
+            inferExprString "match ((), ((), ())) with | (x,y) -> x" `shouldBe` Right tunit
+            inferExprString "match ((), ((), ())) with | (x,y) -> y" `shouldBe` Right (ttuple [tunit, tunit])
+            inferExprString "match ((), ((), ())) with | (x,(y,z)) -> y" `shouldBe` Right tunit
+            inferExprString "match ((), ((), ())) with | (x,(y,z)) -> z" `shouldBe` Right tunit
+            inferExprString "fun t -> match t with | (x,y) -> x" `shouldBe` Right (ttuple [tvar "a", tvar "b"] \-> tvar "a")

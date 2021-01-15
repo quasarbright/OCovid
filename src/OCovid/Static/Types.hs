@@ -67,6 +67,8 @@ subScheme target replacement = let go = subScheme target replacement in \case
                 | otherwise -> SForall x (go t)
     SMono t -> SMono $ subMono target replacement t
 
+-- | run the given substitution function with the list of replacements.
+-- replacement order matters
 subs :: Foldable t => (String -> Type -> a -> a) -> t (String, Type) -> a -> a
 subs f replacements a = foldr (uncurry f) a replacements
 

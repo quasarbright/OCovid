@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
 
 module OCovid.Static.Typing where
 
@@ -120,6 +121,9 @@ annot x t = local (Map.insert x t)
 annots :: [(String, Scheme)] -> Checker a -> Checker a
 annots vars = local $ \m -> foldr (uncurry Map.insert) m vars
 
+annotsMap :: Map String Scheme -> Checker a -> Checker a
+annotsMap vars = local $ Map.union vars
+
 findMono :: Type -> Checker Type
 findMono t = case t of
     TVar{} -> do
@@ -127,18 +131,26 @@ findMono t = case t of
         return (find uf t)
     TArr arg ret -> TArr <$> findMono arg <*> findMono ret
     TTuple ts -> TTuple <$> mapM findMono ts
-        
+
+-- | simplify the type variables so gd -> ddf appears as a -> b
 simplifyMono :: Type -> Type
 simplifyMono t =
     let frees = freeMonoVarsOrdered t
-        replacements = zip frees (fmap TVar names)
-    in subs subMono replacements t
+        n = length frees
+        -- this is necessary bc if frees is [b,a], replacements is [(a->b,b->a)], you get all bs
+        -- if you made a map substitution function, this wouldn't be necessary
+        names_ = show <$> ([1..] :: [Int])
+        replacements = zip frees (fmap TVar names_)
+        t' = subs subMono replacements t
+        replacements' = zip (take n names_) (fmap TVar names)
+        t'' = subs subMono replacements' t'
+    in t''
 
 finalizeScheme :: Scheme -> Checker Scheme
 finalizeScheme = instantiate >=> finalizeMono
 
 finalizeMono :: Type -> Checker Scheme
-finalizeMono = findMono >=> (return . simplifyMono) >=> generalize
+finalizeMono = findMono >=> (return . simplifyMono) >=> (return . blindGeneralize)
 
 --assertEqual :: Type -> Type -> Checker ()
 --assertEqual t t' = unless (t == t') (throwError (Mismatch t t'))
@@ -159,7 +171,7 @@ generalize :: Type -> Checker Scheme
 generalize t = do
     envFrees <- asks freeEnvVars
     let monoFrees = freeMonoVars t
-        frees = Set.union envFrees monoFrees & Set.toList
+        frees = monoFrees `Set.difference` envFrees & Set.toList
     return (foldr SForall (SMono t) frees)
 
 inferExpr :: Expr -> Checker Type
@@ -181,10 +193,38 @@ inferExpr = \case
         tRhs <- inferExpr rhs
         tRhs' <- generalize tRhs
         annot x tRhs' (inferExpr body)
-    Match{} -> undefined
+    Match e cases -> do
+        tE <- inferExpr e
+        ts <- mapM (uncurry (inferMatchCase tE)) cases
+        zipWithM_ unify ts (tail ts)
+        env <- ask
+        uf <- getUF
+        env `seq` uf `seq` return $ head ts
 
 checkExpr :: Type -> Expr -> Checker ()
 checkExpr t e = unify t =<< inferExpr e
+
+inferMatchCase :: Type -> Pattern -> Expr -> Checker Type
+inferMatchCase t p rhs = do
+    vars <- checkPattern t p
+    let varsPairs = Map.toList vars
+    varsPairsGen <- mapM (\(x,t') -> (x,) <$> (SMono <$> findMono t')) varsPairs
+    env <- ask -- debug
+    uf <- getUF -- debug
+    env `seq` uf `seq` annots varsPairsGen (inferExpr rhs)
+
+checkPattern :: Type -> Pattern -> Checker (Map String Type)
+checkPattern t = \case
+    PVar x -> return $ Map.singleton x t -- TODO should you find here?
+    PTuple ps -> do
+        ts <- fmap TVar <$> freshNames (length ps)
+        let t' = TTuple ts
+        unify t t'
+        uf <- getUF -- debug
+        env <- ask -- debug
+        maps <- env `seq` uf `seq` zipWithM checkPattern ts ps
+        return $ Map.unions maps
+
 
 -- | type check the program and return the mapping from names to types of
 -- top level variables
@@ -208,3 +248,8 @@ executeChecker =
 
 inferAndFinalizeExpr :: Expr -> Either TypeError Type
 inferAndFinalizeExpr e = executeChecker (inferExpr e >>= finalizeMono >>= (return . blindInstantiate))
+
+goo :: () -> Either TypeError Type
+goo () = inferAndFinalizeExpr e
+-- fun t -> match t with | (x,y) -> x
+    where e = Fun ["t"] (Match (Var "t") [(PTuple [PVar "x",PVar "y"],Var "x")])

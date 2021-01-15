@@ -79,7 +79,7 @@ pExpr = choice
 pPTuple :: Parser Pattern
 pPTuple = do
     symbol "("
-    patterns <- pPattern `sepBy1` symbol ","
+    patterns <- pPattern `sepBy` symbol ","
     symbol ")"
     case patterns of
         [p] -> return p
