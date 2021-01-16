@@ -42,6 +42,7 @@ instance Show Type where
     show (TArr arg ret) = "("++show arg++"->"++show ret++")"
     show (TTuple []) = "unit"
     show (TTuple ts) = "("++intercalate " * " (show <$> ts)++")"
+    show (TCon name []) = name
     show (TCon name [arg]) = show arg ++ " " ++ name
     show (TCon name args) = "("++intercalate ", " (show <$> args)++") "++name
 

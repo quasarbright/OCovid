@@ -167,6 +167,15 @@ main = hspec $ do
                     ]
                 expected = Right [("map", (tvar "a" \-> tvar "b") \-> tlist (tvar "a") \-> tlist (tvar "b"))]
                 in prog `shouldProgInfer` expected
+            -- messed up map function
+            let prog = unlines
+                    [ "type 'a list = Empty | Cons of 'a * 'a list"
+                    , "let rec map = fun f xs -> match xs with"
+                    , "  | Empty -> Empty"
+                    , "  | Cons(x,xs') -> Cons(f x,xs')" -- forget to recurse
+                    ]
+                expected = Right [("map", (tvar "a" \-> tvar "a") \-> tlist (tvar "a") \-> tlist (tvar "a"))]
+                in prog `shouldProgInfer` expected
             let prog = stdTypes ++ unlines
                     [ "let rec odd = fun n -> match n with"
                     , "  | Zero -> False"
@@ -186,3 +195,25 @@ main = hspec $ do
                     ]
                 expected = Right [("zip", tlist (tvar "a") \-> tlist (tvar "b") \-> tlist (ttuple [tvar "a", tvar "b"]))]
                 in prog `shouldProgInfer` expected
+            -- bad zip
+            let prog = stdTypes ++ unlines
+                    [ "let rec zip = fun xs ys -> match (xs, ys) with"
+                    , "  | (Empty,a) -> Empty"
+                    , "  | (a,Empty) -> Empty"
+                    , "  | (Cons(x,xs'),Cons(y,ys')) -> Cons((x,y),zip ys' xs')" -- swap xs' ys'
+                    ]
+                expected = Right [("zip", tlist (tvar "a") \-> tlist (tvar "a") \-> tlist (ttuple [tvar "a", tvar "a"]))]
+                in prog `shouldProgInfer` expected
+        it "prevents infinte types" $ do
+            inferExprString "let rec f = fun x -> f in f" `shouldBe` Left (OccursError "a" (tvar "b" \-> tvar "a"))
+            inferExprString "let rec f = fun x -> (x,f x) in f" `shouldBe` Left (OccursError "d" (ttuple [tvar "b",  tvar "d"]))
+        it "handles conflicting rhs of match" $ do
+            inferExprString "match () with a -> () | b -> ((),())" `shouldBe` Left (Mismatch tunit (ttuple [tunit,tunit]))
+            inferExprString "fun x -> match x with a -> x | b -> ()" `shouldBe` Right (tunit \-> tunit)
+            inferExprString "fun x -> match x with a -> () | b -> x" `shouldBe` Right (tunit \-> tunit)
+            (stdTypes ++ "let f = fun x -> match x with True -> True | False -> Zero") `shouldProgInfer` Left (Mismatch tbool tnat)
+            (stdTypes ++ "let f = fun x -> match x with True -> Cons(True,Empty) | False -> Cons(Zero,Empty)") `shouldProgInfer` Left (Mismatch tbool tnat)
+        it "handles conflicting lhs of match" $ do
+            (stdTypes ++ "let f = fun x -> match x with True -> True | Zero -> True") `shouldProgInfer` Left (Mismatch tbool tnat)
+            (stdTypes ++ "let f = fun x -> match x with Cons(True,Empty) -> True | Cons(Zero,Empty) -> True") `shouldProgInfer` Left (Mismatch tbool tnat)
+            
