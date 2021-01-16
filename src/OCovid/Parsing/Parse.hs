@@ -9,6 +9,7 @@ import OCovid.Static.Types
 import OCovid.Syntax.Program
 import Control.Monad (void)
 import Data.Functor (($>))
+import Data.Maybe (fromMaybe)
 
 type ExprParser = Parser Expr -> Parser Expr
 
@@ -16,6 +17,9 @@ type ExprParser = Parser Expr -> Parser Expr
 
 pVar :: Parser Expr
 pVar = Var <$> identifier
+
+pCon :: Parser Expr
+pCon = Con <$> upperIdentifier
 
 pApp :: ExprParser
 pApp child = do
@@ -66,6 +70,7 @@ pAtom :: Parser Expr
 pAtom = choice
     [ pTuple <?> "tuple/parenthesized expression"
     , pVar <?> "variable"
+    , pCon <?> "constructor"
     ]
 
 pExpr :: Parser Expr
@@ -88,9 +93,15 @@ pPTuple = do
         [p] -> return p
         _ -> return (PTuple patterns)
 
+pPCon :: Parser Pattern
+pPCon = PCon <$> upperIdentifier <*> optional pPattern    
+
 pPattern :: Parser Pattern
-pPattern =  PVar <$> identifier
-        <|> pPTuple
+pPattern =  choice
+    [ fmap PVar identifier <?> "variable pattern"
+    , pPCon <?> "constructor pattern"
+    , pPTuple <?> "tuple pattern"
+    ]
 
 -- types --
 
@@ -120,8 +131,11 @@ pTCon =
 pTAtom :: Parser Type
 pTAtom = choice [parens pType, pTVar, pTUnit]
 
+pTVar_ :: Parser String
+pTVar_ = string "'" *> identifier
+
 pTVar :: Parser Type
-pTVar = string "'" *> fmap TVar identifier
+pTVar = fmap TVar pTVar_
 
 pTUnit :: Parser Type
 pTUnit = pKeyword "unit" $> TTuple []
@@ -129,17 +143,36 @@ pTUnit = pKeyword "unit" $> TTuple []
 pType :: Parser Type
 pType = pTArr
 
+-- topdecls --
+
+pLetDecl :: Parser TopDecl
+pLetDecl = do
+    pKeyword "let"
+    name <- identifier
+    symbol "="
+    rhs <- pExpr
+    return $ LetDecl name rhs
+
+pTyDecl :: Parser TopDecl
+pTyDecl = do
+    pKeyword "type"
+    mArgs <- optional $ fmap (:[]) pTVar_ <|> parens (pTVar_ `sepBy1` symbol ",")
+    let args = fromMaybe [] mArgs
+    name <- identifier
+    symbol "="
+    let pTyCase = (,) <$> upperIdentifier <*> optional (pKeyword "of" *> pType)
+    cases <- pTyCase `sepBy1` symbol "|"
+    return $ TyDecl args name cases
+
+pTopDecl :: Parser TopDecl
+pTopDecl = choice [pLetDecl, pTyDecl]
+
 -- programs --
 
 pProgram :: Parser Program
-pProgram = Program <$> many bind
-    where
-        bind = do
-            pKeyword "let"
-            name <- identifier
-            symbol "="
-            rhs <- pExpr
-            return (name, rhs)
+pProgram = Program <$> many (pTopDecl <* optional (symbol ";;"))
+
+-- running the parsers
 
 fixLeft :: (Stream s, ShowErrorComponent e) => Either (ParseErrorBundle s e) b -> Either String b
 fixLeft m = case m of
@@ -154,3 +187,6 @@ parseProgram = makeParseFn pProgram
 
 parseExpr :: String -> String -> Either String Expr
 parseExpr = makeParseFn pExpr
+
+parseType :: String -> String -> Either String Type
+parseType = makeParseFn pType

@@ -25,6 +25,7 @@ dependencies:
 - mtl
 - transformers
 - containers
+- extra
 
 library:
   source-dirs: src
@@ -53,3 +54,4 @@ tests:
     dependencies:
     - OCovid
     - hspec
+    - hspec-expectations

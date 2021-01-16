@@ -19,6 +19,7 @@ import Control.Arrow ((>>>))
 import OCovid.Syntax.Expr
 import OCovid.Syntax.Program
 import Data.Function ((&))
+import Data.Tuple.Extra (secondM)
 
 -- types --
 
@@ -26,14 +27,18 @@ data TypeError = Mismatch Type Type
                | OccursError String Type
                | UnboundVar String
                | InternalError String
+               | BadPConArity String Int Int
                deriving(Eq, Ord, Show)
 
-type Store = (UnionFind Type, [String])
+-- | maps ADTs to their type params and cases
+type TyCons = Map String ([String], [(String, Maybe Type)])
+
+type Store = (UnionFind Type, [String], TyCons)
 
 emptyStore :: Store
-emptyStore = (mempty, names)
+emptyStore = (mempty, names, mempty)
 
-type Env = Map String Scheme
+type Env = Map String Scheme -- maps variables and constructors to types
 
 emptyEnv :: Env
 emptyEnv = mempty
@@ -53,20 +58,49 @@ freeEnvVars :: Map String Scheme -> Set String
 freeEnvVars = Map.toList >>> fmap (snd >>> freeSchemeVars) >>> Set.unions
 
 getUF :: Checker (UnionFind Type)
-getUF = gets fst
+getUF = gets (\(uf,_,_) -> uf)
 
 modUF :: (UnionFind Type -> UnionFind Type) -> Checker ()
 modUF f = do
-    (uf,ns) <- get
-    put (f uf,ns)
+    (uf,ns,tcm) <- get
+    put (f uf,ns, tcm)
 
 getNS :: Checker [String]
-getNS = gets snd
+getNS = gets (\(_,ns,_) -> ns)
 
 modNS :: ([String] -> [String]) -> Checker ()
 modNS f = do
-    (uf, ns) <- get
-    put (uf, f ns)
+    (uf, ns, tcm) <- get
+    put (uf, f ns, tcm)
+
+getTCM :: Checker TyCons
+getTCM = gets (\(_,_,tcm) -> tcm)
+
+modTCM :: (TyCons -> TyCons) -> Checker ()
+modTCM f = do
+    (uf,ns,tcm) <- get
+    put (uf, ns, f tcm)
+
+addTyCon :: [String] -> String -> [(String, Maybe Type)] -> Checker ()
+addTyCon args name cases = do
+    modTCM (Map.insert name (args, cases))
+
+getTyConInfo :: String -> Checker ([String], [(String, Maybe Type)])
+getTyConInfo name = do
+    tcm <- getTCM
+    case Map.lookup name tcm of
+        Nothing -> throwError (UnboundVar name)
+        Just info -> return info
+
+getTyConOfCon :: String -> Checker String
+getTyConOfCon con = do
+    tCon <- inferExpr (Con con)
+    let getTCon (TArr _ t) = getTCon t
+        getTCon t = t
+    case getTCon tCon of
+        TCon s _ -> return s
+        _ -> throwError (InternalError "expected TCon")
+    
 
 unify :: Type -> Type -> Checker ()
 unify t1 t2 = do
@@ -198,6 +232,7 @@ inferExpr = \case
         ts <- mapM (uncurry (inferMatchCase tE)) cases
         zipWithM_ unify ts (tail ts)
         return $ head ts
+    Con c -> instantiate =<< lookupVar c
 
 checkExpr :: Type -> Expr -> Checker ()
 checkExpr t e = unify t =<< inferExpr e
@@ -218,18 +253,45 @@ checkPattern t = \case
         unify t t'
         maps <- zipWithM checkPattern ts ps
         return $ Map.unions maps
+    PCon con mP -> do
+        tycon <- getTyConOfCon con
+        (argnames, cases) <- getTyConInfo tycon
+        argts <- fmap TVar <$> freshNames (length argnames)
+        let t' = TCon tycon argts
+        unify t t'
+        let replacements = zip argnames argts
+        case lookup con cases of
+            Nothing -> throwError (UnboundVar con)
+            Just tCon -> case (tCon, mP) of
+                -- constructors either expect a tuple type or nothing
+                -- maybe constructor arg type vs maybe arg pattern
+                (Nothing,Nothing) -> return mempty
+                (Just argT, Just p) -> checkPattern (subs subMono replacements argT) p
+                (Nothing, Just{}) -> throwError (BadPConArity con 0 1)
+                (Just{}, Nothing) -> throwError (BadPConArity con 1 0)
 
+checkTopDecls :: [TopDecl] -> Checker Env
+checkTopDecls [] = ask
+checkTopDecls (decl:rest) =
+    let mRest = checkTopDecls rest
+    in case decl of
+        LetDecl x rhs -> do
+            tRhs <- inferExpr rhs
+            tRhs' <- finalizeScheme =<< generalize tRhs
+            annot x tRhs' mRest
+        TyDecl args name cases -> do
+            -- register the adt
+            addTyCon args name cases
+            -- put the constructors in scope
+            let go conName Nothing = (conName, blindGeneralize $ TCon name (fmap TVar args))
+                go conName (Just t) = (conName, blindGeneralize $ t \-> TCon name (fmap TVar args))
+                vars = fmap (uncurry go) cases
+            annots vars mRest
 
 -- | type check the program and return the mapping from names to types of
 -- top level variables
 checkProgram :: Program -> Checker Env
-checkProgram (Program bindings) = go bindings
-    where
-        go [] = ask
-        go ((x,rhs):rest) = do
-            tRhs <- inferExpr rhs
-            tRhs' <- finalizeScheme =<< generalize tRhs
-            annot x tRhs' (go rest)
+checkProgram (Program decls) = checkTopDecls decls
 
 -- running the monads --
 
@@ -240,12 +302,19 @@ executeChecker =
     >>> (\m -> runRWS m emptyEnv emptyStore)
     >>> (\(a,_,_) -> a)
 
-executeChecker_ :: Checker a -> (Either TypeError a, UnionFind Type)
+executeChecker_ :: Checker a -> (Either TypeError a, UnionFind Type, TyCons)
 executeChecker_ =
     runChecker
     >>> runExceptT
     >>> (\m -> runRWS m emptyEnv emptyStore)
-    >>> (\(a,(uf,_),_) -> (a,uf))
+    >>> (\(a,(uf,_,tcm),_) -> (a,uf,tcm))
 
 inferAndFinalizeExpr :: Expr -> Either TypeError Type
 inferAndFinalizeExpr e = executeChecker (inferExpr e >>= finalizeMono >>= (return . blindInstantiate))
+
+typeCheckProgram :: Program -> Either TypeError (Map String Scheme)
+typeCheckProgram p = executeChecker $ do
+    m <- Map.toList <$> checkProgram p
+    m' <- mapM (secondM finalizeScheme) m
+    return (Map.fromList m')
+            

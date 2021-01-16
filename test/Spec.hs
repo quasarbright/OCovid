@@ -1,4 +1,8 @@
 import Test.Hspec
+import Test.Hspec.Expectations
+
+import qualified Data.Map as Map
+import Data.Map(Map)
 
 import OCovid.Parsing.Parse
 import OCovid.Syntax.Expr
@@ -7,12 +11,41 @@ import OCovid.Static.Types
 
 import OCovid.Static.Typing
 
+import qualified Data.Map as Map
+import Data.Function ((&))
+import Control.Arrow (second)
+import Control.Monad (unless)
+
+expectTrue :: HasCallStack => String -> Bool -> Expectation
+expectTrue msg b = unless b (expectationFailure msg)
+
+compareWith :: (HasCallStack, Show a) => (a -> a -> Bool) -> String -> a -> a -> Expectation
+compareWith comparator errorDesc result expected = expectTrue errorMsg (comparator expected result)
+  where
+    errorMsg = show result ++ " " ++ errorDesc ++ " " ++ show expected
+
 inferExprString :: String -> Either TypeError Type
 inferExprString src = case parseExpr "test/Spec.hs" src of
     Left err -> Left (InternalError err)
     Right e -> case inferAndFinalizeExpr e of
         Left err -> Left err
         Right t -> Right (simplifyMono t)
+
+inferProgramString :: String -> Either TypeError (Map String Type)
+inferProgramString src = case parseProgram "test/Spec.hs" src of
+     Left err -> Left (InternalError err)
+     Right e -> case typeCheckProgram e of
+         Left err -> Left err
+         Right m -> m & Map.map blindInstantiate & Right
+
+shouldContainMap :: (HasCallStack, Ord a, Show a, Show b, Eq b) => Map a b -> Map a b -> Expectation
+shouldContainMap = compareWith Map.isSubmapOf "does not contain"
+
+shouldProgInfer :: HasCallStack => String -> Either TypeError [(String, Type)] -> Expectation
+shouldProgInfer src result = case (inferProgramString src, fmap Map.fromList result) of
+    (Right res, Right res') -> shouldContainMap res res'
+    (x,y) -> shouldBe x y
+    
 
 main :: IO ()
 main = hspec $ do
@@ -73,3 +106,45 @@ main = hspec $ do
             inferExprString "let fst = fun t -> match t with | (x,y) -> x in fst" `shouldBe` Right (ttuple [tvar "a", tvar "b"] \-> tvar "a")
             inferExprString "let fst = fun t -> match t with | (x,y) -> x in fst ((), ((), ()))" `shouldBe` Right tunit
             inferExprString "let fst = fun t -> match t with | (x,y) -> x in fst (fst (((), ()), ()))" `shouldBe` Right tunit
+        it "handles adts" $ do
+            "type tt = TT;; let a = TT;;" `shouldProgInfer` Right [("a", tcon "tt" [])]
+            "type tt = TT;; let a = match TT with TT -> ();;" `shouldProgInfer` Right [("a", tunit)]
+            "type tt = TT;; let a = match TT with TT() -> ();;" `shouldProgInfer` Left (BadPConArity "TT" 0 1)
+            "type 'a list = Empty | Cons of 'a * 'a list;; let a = Cons((),Empty);;" `shouldProgInfer` Right [("a", tlist tunit)] 
+            "type 'a list = Empty | Cons of 'a * 'a list;; let a = fun xs -> match xs with Cons(first,rest) -> first;;" `shouldProgInfer` Right [("a", tlist (tvar "a") \-> tvar "a")] 
+            "type 'a list = Empty | Cons of 'a * 'a list;; let a = fun xs -> match xs with Cons(first,rest) -> rest;;" `shouldProgInfer` Right [("a", tlist (tvar "a") \-> tlist (tvar "a"))] 
+            "type 'a list = Empty | Cons of 'a * 'a list;; let a = fun xs -> match xs with Cons(first,Cons(second,rest)) -> (first,second);;" `shouldProgInfer` Right [("a", tlist (tvar "a") \-> ttuple [tvar "a", tvar "a"])] 
+            "type 'a list = Empty | Cons of 'a * 'a list;; let a = fun xs -> match xs with Cons(first,Cons(second,rest)) -> (first,second);;" `shouldProgInfer` Right [("a", tlist (tvar "a") \-> ttuple [tvar "a", tvar "a"])] 
+            let prog = unlines
+                    [ "type bool = True | False"
+                    , "let not = fun b -> match b with True -> False | False -> True"
+                    , "let and = fun a b -> match (a,b) with (True,True) -> True | x -> False"
+                    , "let or = fun a b -> not (and (not a) (not b))"
+                    ]
+                expected = Right
+                    [ ("not", tbool \-> tbool)
+                    , ("and", tbool \-> tbool \-> tbool)
+                    , ("or", tbool \-> tbool \-> tbool)
+                    ]
+                in prog `shouldProgInfer` expected
+            let prog = unlines
+                    [ "type 'a list = Empty | Cons of 'a * 'a list"
+                    , "type bool = True | False"
+                    , "let not = fun b -> match b with True -> False | False -> True"
+                    , "let and = fun a b -> match (a,b) with (True,True) -> True | x -> False"
+                    , "let or = fun a b -> not (and (not a) (not b))"
+                    , "let f = fun bs -> match bs with Cons(first,Cons(second,rest)) -> and first second"
+                    ]
+                expected = Right
+                    [ ("not", tbool \-> tbool)
+                    , ("and", tbool \-> tbool \-> tbool)
+                    , ("or", tbool \-> tbool \-> tbool)
+                    , ("f", tlist tbool \-> tbool)
+                    ]
+                in prog `shouldProgInfer` expected
+            let prog = unlines
+                    [ "type 'a list = Empty | Cons of 'a * 'a list"
+                    , "let f = fun bs -> match bs with Cons((x,y),Cons(second,rest)) -> x"
+                    ]
+                expected = Right [("f", tlist (ttuple [tvar "a", tvar "b"]) \-> tvar "a")]
+                in prog `shouldProgInfer` expected

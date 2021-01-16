@@ -25,6 +25,15 @@ tvar = TVar
 ttuple :: [Type] -> Type
 ttuple = TTuple
 
+tcon :: String -> [Type] -> Type
+tcon = TCon
+
+tlist :: Type -> Type
+tlist t = TCon "list" [t]
+
+tbool :: Type
+tbool = TCon "bool" []
+
 instance Show Type where
     show (TVar x) = "'"++x
     show (TArr arg ret) = "("++show arg++"->"++show ret++")"
