@@ -7,6 +7,7 @@ data Expr = Var String
           | Tuple [Expr]
           | Fun [String] Expr
           | Let String Expr Expr
+          | LetRec [(String,Expr)] Expr
           | Match Expr [(Pattern, Expr)]
           | Con String
           deriving(Eq, Ord, Show)
@@ -33,3 +34,4 @@ patternOfExpr = \case
     Let{} -> Nothing
     Match{} -> Nothing
     Con c -> Just $ PCon c Nothing
+    LetRec{} -> Nothing

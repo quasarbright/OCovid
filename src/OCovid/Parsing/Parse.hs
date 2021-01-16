@@ -54,6 +54,22 @@ pLet = do
     body <- pExpr
     return (Let name rhs body)
 
+pBinding :: Parser (String, Expr)
+pBinding = do
+    name <- identifier
+    symbol "="
+    rhs <- pExpr
+    return (name,rhs)
+
+pLetRec :: Parser Expr
+pLetRec = do
+    pKeyword "let"
+    pKeyword "rec"
+    bindings <- pBinding `sepBy1` pKeyword "and"
+    pKeyword "in"
+    body <- pExpr
+    return (LetRec bindings body)
+
 pCase :: Parser (Pattern, Expr)
 pCase = (,) <$> (pPattern <* symbol "->") <*> pExpr <?> "match case"
 
@@ -75,7 +91,8 @@ pAtom = choice
 
 pExpr :: Parser Expr
 pExpr = choice
-    [ pLet <?> "let binding"
+    [ try pLetRec <?> "let rec binding"
+    , pLet <?> "let binding"
     , pMatch <?> "match expression"
     , pFun <?> "function expression"
     , pApp pAtom <?> "function application"
@@ -123,9 +140,9 @@ pTCon :: Parser Type
 pTCon =
     let pArgs = try (fmap (:[]) pTAtom) <|> parens (pType `sepBy1` symbol ",")
         p = do
-            args <- pArgs
+            mArgs <- optional pArgs
             name <- identifier
-            return $ TCon name args
+            return $ TCon name (fromMaybe [] mArgs)
     in try p <|> pTAtom
 
 pTAtom :: Parser Type
@@ -153,6 +170,14 @@ pLetDecl = do
     rhs <- pExpr
     return $ LetDecl name rhs
 
+pLetRecDecl :: Parser TopDecl
+pLetRecDecl = do
+    pKeyword "let"
+    pKeyword "rec"
+    bindings <- pBinding `sepBy1` pKeyword "and"
+    return $ LetRecDecl bindings
+    
+
 pTyDecl :: Parser TopDecl
 pTyDecl = do
     pKeyword "type"
@@ -165,7 +190,7 @@ pTyDecl = do
     return $ TyDecl args name cases
 
 pTopDecl :: Parser TopDecl
-pTopDecl = choice [pLetDecl, pTyDecl]
+pTopDecl = choice [try pLetRecDecl, pLetDecl, pTyDecl]
 
 -- programs --
 

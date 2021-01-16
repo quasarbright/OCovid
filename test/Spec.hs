@@ -45,7 +45,16 @@ shouldProgInfer :: HasCallStack => String -> Either TypeError [(String, Type)] -
 shouldProgInfer src result = case (inferProgramString src, fmap Map.fromList result) of
     (Right res, Right res') -> shouldContainMap res res'
     (x,y) -> shouldBe x y
-    
+
+stdTypes = unlines
+    [ "type 'a list = Empty | Cons of 'a * 'a list"
+    , "type bool = True | False"
+    , "type nat = Zero | Succ of nat"
+    ]
+
+stdLib = stdTypes ++ unlines
+    [ "let not = fun b -> match b with True -> False | False -> True"
+    ]
 
 main :: IO ()
 main = hspec $ do
@@ -118,12 +127,12 @@ main = hspec $ do
             let prog = unlines
                     [ "type bool = True | False"
                     , "let not = fun b -> match b with True -> False | False -> True"
-                    , "let and = fun a b -> match (a,b) with (True,True) -> True | x -> False"
-                    , "let or = fun a b -> not (and (not a) (not b))"
+                    , "let and' = fun a b -> match (a,b) with (True,True) -> True | x -> False"
+                    , "let or = fun a b -> not (and' (not a) (not b))"
                     ]
                 expected = Right
                     [ ("not", tbool \-> tbool)
-                    , ("and", tbool \-> tbool \-> tbool)
+                    , ("and'", tbool \-> tbool \-> tbool)
                     , ("or", tbool \-> tbool \-> tbool)
                     ]
                 in prog `shouldProgInfer` expected
@@ -131,13 +140,13 @@ main = hspec $ do
                     [ "type 'a list = Empty | Cons of 'a * 'a list"
                     , "type bool = True | False"
                     , "let not = fun b -> match b with True -> False | False -> True"
-                    , "let and = fun a b -> match (a,b) with (True,True) -> True | x -> False"
-                    , "let or = fun a b -> not (and (not a) (not b))"
-                    , "let f = fun bs -> match bs with Cons(first,Cons(second,rest)) -> and first second"
+                    , "let and' = fun a b -> match (a,b) with (True,True) -> True | x -> False"
+                    , "let or = fun a b -> not (and' (not a) (not b))"
+                    , "let f = fun bs -> match bs with Cons(first,Cons(second,rest)) -> and' first second"
                     ]
                 expected = Right
                     [ ("not", tbool \-> tbool)
-                    , ("and", tbool \-> tbool \-> tbool)
+                    , ("and'", tbool \-> tbool \-> tbool)
                     , ("or", tbool \-> tbool \-> tbool)
                     , ("f", tlist tbool \-> tbool)
                     ]
@@ -147,4 +156,33 @@ main = hspec $ do
                     , "let f = fun bs -> match bs with Cons((x,y),Cons(second,rest)) -> x"
                     ]
                 expected = Right [("f", tlist (ttuple [tvar "a", tvar "b"]) \-> tvar "a")]
+                in prog `shouldProgInfer` expected
+        it "handles recursive functions" $ do
+            inferExprString "let rec f = f in f" `shouldBe` Right (tvar "a")
+            let prog = unlines
+                    [ "type 'a list = Empty | Cons of 'a * 'a list"
+                    , "let rec map = fun f xs -> match xs with"
+                    , "  | Empty -> Empty"
+                    , "  | Cons(x,xs') -> Cons(f x,map f xs')"
+                    ]
+                expected = Right [("map", (tvar "a" \-> tvar "b") \-> tlist (tvar "a") \-> tlist (tvar "b"))]
+                in prog `shouldProgInfer` expected
+            let prog = stdTypes ++ unlines
+                    [ "let rec odd = fun n -> match n with"
+                    , "  | Zero -> False"
+                    , "  | Succ n' -> even n'"
+                    , "and even = fun n -> match n with"
+                    , "  | Zero -> True"
+                    , "  | Succ n' -> odd n'"
+                    ]
+                expected = Right
+                    [("odd", tnat \-> tbool), ("even", tnat \-> tbool)]
+                in prog `shouldProgInfer` expected
+            let prog = stdTypes ++ unlines
+                    [ "let rec zip = fun xs ys -> match (xs, ys) with"
+                    , "  | (Empty,a) -> Empty"
+                    , "  | (a,Empty) -> Empty"
+                    , "  | (Cons(x,xs'),Cons(y,ys')) -> Cons((x,y),zip xs' ys')"
+                    ]
+                expected = Right [("zip", tlist (tvar "a") \-> tlist (tvar "b") \-> tlist (ttuple [tvar "a", tvar "b"]))]
                 in prog `shouldProgInfer` expected

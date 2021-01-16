@@ -108,6 +108,7 @@ unify t1 t2 = do
     let t1' = find uf t1
         t2' = find uf t2
     case (t1', t2') of
+        _ | t1' == t2' -> return ()
         (TArr arg1 ret1, TArr arg2 ret2) ->
             zipWithM_ unify [arg1, ret1] [arg2, ret2]
         (TTuple ts1, TTuple ts2)
@@ -208,6 +209,16 @@ generalize t_ = do
         frees = monoFrees `Set.difference` envFrees & Set.toList
     return (foldr SForall (SMono t) frees)
 
+checkRecBindings :: (Type -> Checker b) -> [(String, Expr)] -> Checker [(String, b)]
+checkRecBindings generalizer bindings = do
+    taus <- freshNames (length bindings)
+    let blankMonos = fmap TVar taus
+        blankSchemes = fmap SMono blankMonos
+        env' = zip (fmap fst bindings) blankSchemes
+    zipWithM_ (\t e -> annots env' $ checkExpr t e) blankMonos (fmap snd bindings)
+    genSchemes <- mapM generalizer blankMonos
+    return $ zip (fmap fst bindings) genSchemes
+
 inferExpr :: Expr -> Checker Type
 inferExpr = \case
     Var x -> instantiate =<< lookupVar x
@@ -227,6 +238,9 @@ inferExpr = \case
         tRhs <- inferExpr rhs
         tRhs' <- generalize tRhs
         annot x tRhs' (inferExpr body)
+    LetRec bindings body -> do
+        vars <- checkRecBindings generalize bindings
+        annots vars (inferExpr body)
     Match e cases -> do
         tE <- inferExpr e
         ts <- mapM (uncurry (inferMatchCase tE)) cases
@@ -279,6 +293,9 @@ checkTopDecls (decl:rest) =
             tRhs <- inferExpr rhs
             tRhs' <- finalizeScheme =<< generalize tRhs
             annot x tRhs' mRest
+        LetRecDecl bindings -> do
+            vars <- checkRecBindings (finalizeScheme <=< generalize) bindings
+            annots vars mRest
         TyDecl args name cases -> do
             -- register the adt
             addTyCon args name cases

@@ -6,6 +6,7 @@ import OCovid.Static.Types
 -- type 'a list = Empty | Cons of 'a * 'a list
 
 data TopDecl = LetDecl String Expr
+             | LetRecDecl [(String,Expr)]
              | TyDecl [String] String [(String, Maybe Type)]
              deriving(Eq, Ord, Show)
 

@@ -34,6 +34,9 @@ tlist t = TCon "list" [t]
 tbool :: Type
 tbool = TCon "bool" []
 
+tnat :: Type
+tnat = TCon "nat" []
+
 instance Show Type where
     show (TVar x) = "'"++x
     show (TArr arg ret) = "("++show arg++"->"++show ret++")"
