@@ -119,11 +119,11 @@ main = hspec $ do
             "type tt = TT;; let a = TT;;" `shouldProgInfer` Right [("a", tcon "tt" [])]
             "type tt = TT;; let a = match TT with TT -> ();;" `shouldProgInfer` Right [("a", tunit)]
             "type tt = TT;; let a = match TT with TT() -> ();;" `shouldProgInfer` Left (BadPConArity "TT" 0 1)
-            "type 'a list = Empty | Cons of 'a * 'a list;; let a = Cons((),Empty);;" `shouldProgInfer` Right [("a", tlist tunit)] 
-            "type 'a list = Empty | Cons of 'a * 'a list;; let a = fun xs -> match xs with Cons(first,rest) -> first;;" `shouldProgInfer` Right [("a", tlist (tvar "a") \-> tvar "a")] 
-            "type 'a list = Empty | Cons of 'a * 'a list;; let a = fun xs -> match xs with Cons(first,rest) -> rest;;" `shouldProgInfer` Right [("a", tlist (tvar "a") \-> tlist (tvar "a"))] 
-            "type 'a list = Empty | Cons of 'a * 'a list;; let a = fun xs -> match xs with Cons(first,Cons(second,rest)) -> (first,second);;" `shouldProgInfer` Right [("a", tlist (tvar "a") \-> ttuple [tvar "a", tvar "a"])] 
-            "type 'a list = Empty | Cons of 'a * 'a list;; let a = fun xs -> match xs with Cons(first,Cons(second,rest)) -> (first,second);;" `shouldProgInfer` Right [("a", tlist (tvar "a") \-> ttuple [tvar "a", tvar "a"])] 
+            "type 'a list = Empty | Cons of 'a * 'a list;; let a = Cons((),Empty);;" `shouldProgInfer` Right [("a", tlist tunit)]
+            "type 'a list = Empty | Cons of 'a * 'a list;; let a = fun xs -> match xs with Cons(first,rest) -> first;;" `shouldProgInfer` Right [("a", tlist (tvar "a") \-> tvar "a")]
+            "type 'a list = Empty | Cons of 'a * 'a list;; let a = fun xs -> match xs with Cons(first,rest) -> rest;;" `shouldProgInfer` Right [("a", tlist (tvar "a") \-> tlist (tvar "a"))]
+            "type 'a list = Empty | Cons of 'a * 'a list;; let a = fun xs -> match xs with Cons(first,Cons(second,rest)) -> (first,second);;" `shouldProgInfer` Right [("a", tlist (tvar "a") \-> ttuple [tvar "a", tvar "a"])]
+            "type 'a list = Empty | Cons of 'a * 'a list;; let a = fun xs -> match xs with Cons(first,Cons(second,rest)) -> (first,second);;" `shouldProgInfer` Right [("a", tlist (tvar "a") \-> ttuple [tvar "a", tvar "a"])]
             let prog = unlines
                     [ "type bool = True | False"
                     , "let not = fun b -> match b with True -> False | False -> True"
@@ -216,4 +216,11 @@ main = hspec $ do
         it "handles conflicting lhs of match" $ do
             (stdTypes ++ "let f = fun x -> match x with True -> True | Zero -> True") `shouldProgInfer` Left (Mismatch tbool tnat)
             (stdTypes ++ "let f = fun x -> match x with Cons(True,Empty) -> True | Cons(Zero,Empty) -> True") `shouldProgInfer` Left (Mismatch tbool tnat)
+        it "handles bad constructor arity" $ do
+            (stdTypes ++ "let x = True()") `shouldProgInfer` Left (Mismatch (tvar "a" \-> tvar "b") tbool)
+            (stdTypes ++ "let x = match True with True() -> ()") `shouldProgInfer` Left (BadPConArity "True" 0 1)
+            (stdTypes ++ "let x = match Empty with Cons -> ()") `shouldProgInfer` Left (BadPConArity "Cons" 1 0)
+            (stdTypes ++ "let x = match Cons(True,Empty) with Cons x -> x") `shouldProgInfer` Right [("x", ttuple [tbool, tlist tbool])]
+            (stdTypes ++ "type t = T of bool;; let x = match T True with T x -> x") `shouldProgInfer` Right [("x",tbool)] 
+            (stdTypes ++ "type t = T of bool;; let x = match T True with T(x) -> x") `shouldProgInfer` Right [("x",tbool)] 
             
