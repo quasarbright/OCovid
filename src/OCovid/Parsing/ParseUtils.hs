@@ -59,10 +59,7 @@ upperIdentStart :: Parser Char
 upperIdentStart = satisfy isUpper
 
 identLetter :: Parser Char
-identLetter = identStart <|> numberChar <|> char '\''
-
-upperIdentLetter :: Parser Char
-upperIdentLetter = upperIdentStart <|> identLetter
+identLetter = identStart <|> satisfy isUpper <|> numberChar <|> char '\''
 
 identifier :: Parser String
 identifier = (lexeme . try) (p >>= check)
@@ -76,7 +73,7 @@ identifier = (lexeme . try) (p >>= check)
 upperIdentifier :: Parser String
 upperIdentifier = (lexeme . try) (p >>= check)
     where
-    p = (:) <$> upperIdentStart <*> many upperIdentLetter
+    p = (:) <$> upperIdentStart <*> many identLetter
     check x =
         if x `elem` reservedWords
         then fail $ "keyword " ++ show x ++ " cannot be an identifier"

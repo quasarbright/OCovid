@@ -241,6 +241,62 @@ main = hspec $ do
             inferExprString "(fun x -> x) (fun x -> x) ()" `shouldBe` Right tunit
         it "doesn't allow y combinator :(" $ do
             inferExprString "fun f -> (fun x -> f (x x)) (fun x -> f (x x))" `shouldBe` Left (OccursError "g" (tvar "g" \-> tvar "h"))
+        it "infers foldr" $ do
+            let prog = stdTypes ++ unlines
+                    [ "let rec foldr = fun f z xs -> match xs with"
+                    , "  | Empty -> z"
+                    , "  | Cons(x,xs) -> f x (foldr f z xs)"
+                    , "let map = fun f -> foldr (fun x ys -> Cons(f x,ys)) Empty"
+                    , "let flip = fun f x y -> f y x"
+                    , "let curry = fun f x y -> f (x,y)"
+                    , "let append = flip (foldr (curry Cons))"
+                    , "let concat = foldr append Empty"
+                    ]
+                expected = Right
+                    [ ("foldr", (tvar "a" \-> tvar "b" \-> tvar "b") \-> tvar "b" \-> tlist (tvar "a") \-> tvar "b")
+                    , ("map", (tvar "a" \-> tvar "b") \-> tlist (tvar "a") \-> tlist (tvar "b"))
+                    , ("append", tlist (tvar "a") \-> tlist (tvar "a") \-> tlist (tvar "a"))
+                    , ("concat", tlist (tlist (tvar "a")) \-> tlist (tvar "a"))
+                    ]
+                in prog `shouldProgInfer` expected
+        it "infers monadic bind" $ do
+            let prog = unlines
+                    [ "type 'a option = None | Some of 'a"
+                    , "let bind = fun ma k -> match ma with"
+                    , "  | None -> None"
+                    , "  | Some a -> k a"
+                    ]
+                expected = Right
+                    [ ("bind", toption (tvar "a") \-> (tvar "a" \-> toption (tvar "b")) \-> toption (tvar "b"))
+                    ]
+                in shouldProgInfer prog expected
+            let prog = unlines
+                    [ "type ('a,'b) result = Ok of 'a | Error of 'b"
+                    , "let bind = fun ma k -> match ma with"
+                    , "  | Error err -> Error err"
+                    , "  | Ok a -> k a"
+                    ]
+                expected = Right
+                    [ ("bind", tresult (tvar "a") (tvar "b") \-> (tvar "a" \-> tresult (tvar "c") (tvar "b")) \-> tresult (tvar "c") (tvar "b"))
+                    ]
+                in shouldProgInfer prog expected
+            let prog = unlines
+                    [ "type 'a list = Empty | Cons of 'a * 'a list"
+                    , "let rec foldr = fun f z xs -> match xs with"
+                    , "  | Empty -> z"
+                    , "  | Cons(x,xs) -> f x (foldr f z xs)"
+                    , "let map = fun f -> foldr (fun x ys -> Cons(f x,ys)) Empty"
+                    , "let flip = fun f x y -> f y x"
+                    , "let curry = fun f x y -> f (x,y)"
+                    , "let append = flip (foldr (curry Cons))"
+                    , "let concat = foldr append Empty"
+                    , "let concatMap = fun f xs -> concat (map f xs)"
+                    , "let bind = flip concatMap"
+                    ]
+                expected = Right
+                    [ ("bind", tlist (tvar "a") \-> (tvar "a" \-> tlist (tvar "b")) \-> tlist (tvar "b"))
+                    ]
+                in shouldProgInfer prog expected
     describe "well formedness checker" $ do
         it "handles unbound vars" $ do
             wfExprString "x" `shouldBe` [WF.UnboundVar "x"]
