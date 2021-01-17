@@ -16,6 +16,8 @@ import Data.Map(Map)
 import Control.Arrow ((>>>))
 import Data.Function ((&))
 
+-- TODO assert rhs of letrec is fun
+
 -- types --
 
 data WFError = UnboundVar String

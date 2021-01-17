@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: aa7427db285d44c4af1405e8a5b0a33fd6f798f1bdf4729abe84124bfec6b917
+-- hash: a6969ee6151935810f26da669e1abbb9ce9986e3c5dbae98622126be2c673d76
 
 name:           OCovid
 version:        0.1.0.0
@@ -28,6 +28,7 @@ source-repository head
 library
   exposed-modules:
       Lib
+      OCovid.Eval.Eval
       OCovid.Parsing.Parse
       OCovid.Parsing.ParseUtils
       OCovid.Repl
