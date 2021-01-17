@@ -16,6 +16,8 @@ import Data.Function ((&))
 import Control.Arrow (second)
 import Control.Monad (unless)
 
+import qualified OCovid.Static.WellFormedness as WF
+
 expectTrue :: HasCallStack => String -> Bool -> Expectation
 expectTrue msg b = unless b (expectationFailure msg)
 
@@ -45,6 +47,17 @@ shouldProgInfer :: HasCallStack => String -> Either TypeError [(String, Type)] -
 shouldProgInfer src result = case (inferProgramString src, fmap Map.fromList result) of
     (Right res, Right res') -> shouldContainMap res res'
     (x,y) -> shouldBe x y
+
+wfExprString :: String -> [WF.WFError]
+wfExprString src = case parseExpr "test/Spec.hs" src of
+    Left err -> [WF.InternalError err]
+    Right e -> WF.executeChecker (WF.checkExpr e)
+
+wfProgString :: String -> [WF.WFError]
+wfProgString src = case parseProgram "test/Spec.hs" src of
+    Left err -> [WF.InternalError err]
+    Right e -> WF.executeChecker (WF.checkProgram e)
+        
 
 stdTypes = unlines
     [ "type 'a list = Empty | Cons of 'a * 'a list"
@@ -228,3 +241,59 @@ main = hspec $ do
             inferExprString "(fun x -> x) (fun x -> x) ()" `shouldBe` Right tunit
         it "doesn't allow y combinator :(" $ do
             inferExprString "fun f -> (fun x -> f (x x)) (fun x -> f (x x))" `shouldBe` Left (OccursError "g" (tvar "g" \-> tvar "h"))
+    describe "well formedness checker" $ do
+        it "handles unbound vars" $ do
+            wfExprString "x" `shouldBe` [WF.UnboundVar "x"]
+            wfExprString "let x = x in ()" `shouldBe` [WF.UnboundVar "x"]
+            wfExprString "let x = (let y = () in y) in y" `shouldBe` [WF.UnboundVar "y"]
+            wfExprString "let rec x = x in x" `shouldBe` []
+            wfExprString "match () with x -> (x,y)" `shouldBe` [WF.UnboundVar "y"]
+            wfExprString "((((x),()),()),())" `shouldBe` [WF.UnboundVar "x"]
+            wfExprString "X" `shouldBe` [WF.UnboundVar "X"]
+        it "handles duplicates variables in let rec" $ do
+            wfExprString "let rec x = () and x = () in ()" `shouldBe` [WF.DupVar "x"]
+            wfExprString "let rec x = () and y = () and x = () in ()" `shouldBe` [WF.DupVar "x"]
+            wfExprString "let rec x = (let rec x = x in x) in x" `shouldBe` []
+            wfProgString "let rec x = () and x = ()" `shouldBe` [WF.DupVar "x"]
+            wfProgString "let rec x = () and y = () and x = ()" `shouldBe` [WF.DupVar "x"]
+            wfProgString "let rec x = (let rec x = x in x)" `shouldBe` []
+            wfExprString "let x = () in let x = () in x" `shouldBe` []
+            wfProgString "let x = ();; let x = ()" `shouldBe` []
+        it "handles duplicate type definitions" $ do
+            wfProgString "type bool = True;; type bool = True | False" `shouldBe` [WF.DupTCon "bool", WF.DupVar "True"]
+            wfProgString "type bool = T;; let x = T;; type bool = True" `shouldBe` [WF.DupTCon "bool"]
+            wfProgString "type bool = T;; let x = T;; type 'a bool = True" `shouldBe` [WF.DupTCon "bool"]
+        it "handles duplicate constructor names" $ do
+            wfProgString "type t = T | T" `shouldBe` [WF.DupVar "T"]
+            wfProgString "type t = T;; type t2 = T" `shouldBe` [WF.DupVar "T"]
+        it "handles duplicate type argument names to types" $ do
+            wfProgString "type ('a, 'a) list = Empty" `shouldBe` [WF.DupTVar "a"]
+            wfProgString "type ('a, 'b, 'a) list = Empty" `shouldBe` [WF.DupTVar "a"]
+            wfProgString "type 'a list = Empty;; type 'a list2 = Empty2" `shouldBe` []
+        it "allows recursive types" $ do
+            wfProgString "type 'a list = Empty | Cons of 'a * 'a list" `shouldBe` []
+            wfProgString "type 'a bt = Leaf of 'a | Node of 'a bt * 'a bt" `shouldBe` []
+        it "handles unbound types in type definitions" $ do
+            wfProgString "type t = T of t2" `shouldBe` [WF.UnboundTCon "t2"]
+            wfProgString "type t = T of t2;; type t2 = T2" `shouldBe` [WF.UnboundTCon "t2"]
+        it "handles unbound type variables in type definitions" $ do
+            wfProgString "type t = T of 'a" `shouldBe` [WF.UnboundTVar "a"]
+            wfProgString "type 'a list = Empty | Cons of 'a * 'a list;; type t = T of 'a list" `shouldBe` [WF.UnboundTVar "a"]
+        it "handles patterns with duplicate variables" $ do
+            wfExprString "match ((),()) with (x,x) -> x" `shouldBe` [WF.DupVar "x"]
+            wfExprString "match ((),((),())) with (x,(x,y)) -> x" `shouldBe` [WF.DupVar "x"]
+            wfExprString "match ((),()) with | (x,y) -> x | (x,y) -> y" `shouldBe` []
+        it "handles type arity errors" $ do
+            wfProgString "type t = T;; type 'a t' = T' of 'a t" `shouldBe` [WF.TypeArityError "t" 0 1]
+            wfProgString "type 'a t = T;; type 'a t' = T' of t" `shouldBe` [WF.TypeArityError "t" 1 0]
+            let prog = unlines
+                    [ "type ('a,'b) pair = Pair of 'a * 'b"
+                    , "type t0 = T0 of pair"
+                    , "type 'a t1 = T1 of 'a pair"
+                    , "type ('a,'b,'c) t3 = T3 of ('a,'b,'c) pair" 
+                    ]
+                errs = WF.TypeArityError "pair" 2 <$> [0,1,3]
+                in wfProgString prog `shouldBe` errs
+            
+            
+            
