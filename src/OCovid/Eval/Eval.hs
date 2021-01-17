@@ -226,10 +226,3 @@ evalBoxed = \case
 
 evalExpr' :: Expr -> Interpreter Value
 evalExpr' = evalExpr >=> evalCell
-
---
---    Fun [x] body -> VFun x body <$> ask
---    Fun xs body -> evalExpr =<< curryFun xs body
---    Tuple es -> VTuple <$> mapM evalExpr es
---    LetRec [(x,Fun [arg] fbody)] body -> do
---        fbod
