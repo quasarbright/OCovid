@@ -11,6 +11,8 @@ import OCovid.Syntax.Program
 
 import Data.Map(Map)
 import qualified Data.Map as Map
+import Control.Arrow ((>>>))
+import Data.List (intercalate)
 
 -- types --
 
@@ -22,10 +24,10 @@ data RuntimeError = PatternMatchFail
 
 -- | heap things. complex structures
 data Boxed = BFun String Expr Stack -- a function has the variables it closes over
+           | BFunBuiltin (Cell -> Interpreter Cell)
            | BCon String (Maybe Cell)
            | BTuple [Cell]
            | BNull -- for letrec
-           deriving(Eq, Ord, Show)
 
 -- | primitives/pointers. like a word of memory
 newtype Cell = CPtr Addr
@@ -33,10 +35,19 @@ newtype Cell = CPtr Addr
              deriving(Eq, Ord, Show)
 
 data Value = VFun String Expr Stack
+           | VFunBuiltin
            | VCon String (Maybe Value)
            | VTuple [Value]
            -- primitives will go here
-           deriving(Eq, Ord, Show)
+           deriving(Eq, Ord)
+
+instance Show Value where
+    show = \case
+        VFun x _ _ -> "<function "++x++">"
+        VFunBuiltin -> "<builtin function>"
+        VCon con Nothing -> con
+        VCon con (Just v) -> con++" "++show v
+        VTuple vs -> "("++intercalate ", " (show <$> vs)++")"
 
 type Addr = Integer
 
@@ -107,11 +118,11 @@ withVar :: String -> Cell -> Interpreter a -> Interpreter a
 withVar x c = local (Map.insert x c)
 
 withVars :: [(String, Cell)] -> Interpreter a -> Interpreter a
-withVars vars = local (Map.union (Map.fromList vars))
+withVars vars = local (mappend (Map.fromList vars))
 
 -- | adds to the stack
 withStack :: Stack -> Interpreter a -> Interpreter a
-withStack vars = local (Map.union vars)
+withStack vars = local (mappend vars)
 
 -- | replaces the stack
 usingStack :: Stack -> Interpreter a -> Interpreter a
@@ -137,7 +148,7 @@ evalRecBindings bindings = do
     stack <- getStack
     let stackAdds = zip vars (fmap CPtr addrs)
         -- includes bindings (currently point to null)
-        stack' = Map.fromList stackAdds `Map.union` stack
+        stack' = Map.fromList stackAdds <> stack
         getFun :: Expr -> Interpreter ([String],Expr)
         getFun = \case
             Fun xs body' -> return (xs,body')
@@ -161,6 +172,9 @@ evalExpr = \case
                     BFun arg body stack -> do
                         xC <- evalExpr x
                         usingStack (Map.insert arg xC stack) (evalExpr body)
+                    BFunBuiltin runner -> do
+                        xC <- evalExpr x
+                        runner xC
                     _ -> throwError $ InternalError "called non-function"
     Tuple es -> do
         cs <- mapM evalExpr es
@@ -202,7 +216,7 @@ patternMatch c p = case (c,p) of
     (CPtr addr, PTuple ps) -> boxedOfAddr addr >>= \case
         BTuple cs -> do
             stacks <- zipWithM patternMatch cs ps
-            return $ Map.unions stacks
+            return $ mconcat stacks
         _ -> throwError PatternMatchFail
     (CPtr addr, PCon con mP) -> boxedOfAddr addr >>= \case
         BCon con' mCell -> do
@@ -220,9 +234,49 @@ evalCell = \case
 evalBoxed :: Boxed -> Interpreter Value
 evalBoxed = \case
     BFun arg body stack -> return $ VFun arg body stack
+    BFunBuiltin{} -> return VFunBuiltin
     BTuple cs -> VTuple <$> mapM evalCell cs
     BCon con Nothing -> return $ VCon con Nothing
     BCon con (Just c) -> VCon con . Just <$> evalCell c
+    BNull -> throwError $ InternalError "eval BNull"
 
 evalExpr' :: Expr -> Interpreter Value
 evalExpr' = evalExpr >=> evalCell
+
+evalVCon :: String -> Maybe a -> Boxed
+evalVCon name Nothing = BCon name Nothing
+evalVCon name Just{} = BFunBuiltin $ \c -> CPtr <$> malloc (BCon name (Just c))
+
+evalTopDecls :: [TopDecl] -> Interpreter Stack
+evalTopDecls [] = ask
+evalTopDecls (decl:rest) = let mRest = evalTopDecls rest in case decl of
+    LetDecl x rhs -> do
+        c <- evalExpr rhs
+        withVar x c mRest
+    LetRecDecl bindings -> do
+        stack' <- evalRecBindings bindings
+        usingStack stack' mRest
+    TyDecl _ _ cons -> do
+        let conNames = fmap fst cons
+            boxes = fmap (uncurry evalVCon) cons
+        cells <- mapM (fmap CPtr . malloc) boxes
+        withVars (zip conNames cells) mRest
+
+evalProg :: Program -> Interpreter (Stack, Maybe Value)
+evalProg (Program decls) = do
+    stack <- evalTopDecls decls
+    vals <- mapM evalCell stack
+    return $ (stack, Map.lookup "main" vals)
+
+executeInterpreter :: Interpreter a -> (Either RuntimeError a, Store)
+executeInterpreter =
+    runInterpreter
+    >>> runExceptT
+    >>> (\m -> runRWS m emptyEnv emptyStore)
+    >>> (\(a,s,_) -> (a,s))
+
+interpretExpr :: Expr -> (Either RuntimeError Cell, Store)
+interpretExpr = executeInterpreter . evalExpr
+
+interpretProgram :: Program -> (Either RuntimeError (Stack, Maybe Value), Store)
+interpretProgram = executeInterpreter . evalProg
