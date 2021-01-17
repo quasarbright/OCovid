@@ -37,6 +37,12 @@ tbool = TCon "bool" []
 tnat :: Type
 tnat = TCon "nat" []
 
+toption :: Type -> Type
+toption t = TCon "option" [t]
+
+tresult :: Type -> Type -> Type
+tresult a b = TCon "result" [a,b]
+
 instance Show Type where
     show (TVar x) = "'"++x
     show (TArr arg ret) = "("++show arg++"->"++show ret++")"
