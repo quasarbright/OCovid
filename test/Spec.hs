@@ -221,6 +221,10 @@ main = hspec $ do
             (stdTypes ++ "let x = match True with True() -> ()") `shouldProgInfer` Left (BadPConArity "True" 0 1)
             (stdTypes ++ "let x = match Empty with Cons -> ()") `shouldProgInfer` Left (BadPConArity "Cons" 1 0)
             (stdTypes ++ "let x = match Cons(True,Empty) with Cons x -> x") `shouldProgInfer` Right [("x", ttuple [tbool, tlist tbool])]
-            (stdTypes ++ "type t = T of bool;; let x = match T True with T x -> x") `shouldProgInfer` Right [("x",tbool)] 
-            (stdTypes ++ "type t = T of bool;; let x = match T True with T(x) -> x") `shouldProgInfer` Right [("x",tbool)] 
-            
+            (stdTypes ++ "type t = T of bool;; let x = match T True with T x -> x") `shouldProgInfer` Right [("x",tbool)]
+            (stdTypes ++ "type t = T of bool;; let x = match T True with T(x) -> x") `shouldProgInfer` Right [("x",tbool)]
+        it "instantiates on matches" $ do
+            inferExprString "match (fun x -> x) with f -> f f ()" `shouldBe` Left (OccursError "a" (tvar "a" \-> tvar "a"))
+            inferExprString "(fun x -> x) (fun x -> x) ()" `shouldBe` Right tunit
+        it "doesn't allow y combinator :(" $ do
+            inferExprString "fun f -> (fun x -> f (x x)) (fun x -> f (x x))" `shouldBe` Left (OccursError "g" (tvar "g" \-> tvar "h"))
