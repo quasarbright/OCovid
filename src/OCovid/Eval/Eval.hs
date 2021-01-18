@@ -266,7 +266,7 @@ evalProg :: Program -> Interpreter (Stack, Maybe Value)
 evalProg (Program decls) = do
     stack <- evalTopDecls decls
     vals <- mapM evalCell stack
-    return $ (stack, Map.lookup "main" vals)
+    return (stack, Map.lookup "main" vals)
 
 executeInterpreter :: Interpreter a -> (Either RuntimeError a, Store)
 executeInterpreter =
