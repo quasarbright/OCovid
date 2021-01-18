@@ -119,6 +119,7 @@ checkCase p rhs = do
             PVar x -> [x]
             PTuple ps -> (concatMap freePatternVarsDups ps)
             PCon _ mP -> maybe [] freePatternVarsDups mP
+            PWild -> []
     let vars = freePatternVarsDups p
     checkPattern p
     checkDupVar vars
@@ -145,6 +146,7 @@ checkPattern = \case
     PVar{} -> nothing
     PTuple ps -> mapM_ checkPattern ps
     PCon c mP -> assertVar c >> maybe nothing checkPattern mP
+    PWild -> nothing
 
 checkType :: Type -> Checker ()
 checkType = \case

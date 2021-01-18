@@ -283,6 +283,7 @@ checkPattern t = \case
                 (Just argT, Just p) -> checkPattern (subs subMono replacements argT) p
                 (Nothing, Just{}) -> throwError (BadPConArity con 0 1)
                 (Just{}, Nothing) -> throwError (BadPConArity con 1 0)
+    PWild -> return mempty
 
 checkTopDecls :: [TopDecl] -> Checker Env
 checkTopDecls [] = ask

@@ -15,14 +15,16 @@ data Expr = Var String
 data Pattern = PVar String
              | PTuple [Pattern]
              | PCon String (Maybe Pattern)
+             | PWild
              deriving(Eq, Ord, Show)
 
-exprOfPattern :: Pattern -> Expr
+exprOfPattern :: Pattern -> Maybe Expr
 exprOfPattern = \case
-    PVar x -> Var x
-    PTuple ps -> Tuple (fmap exprOfPattern ps)
-    PCon c Nothing -> Con c
-    PCon c (Just p) -> App (Con c) (exprOfPattern p)
+    PVar x -> Just $ Var x
+    PTuple ps -> Tuple <$> mapM exprOfPattern ps
+    PCon c Nothing -> Just $ Con c
+    PCon c (Just p) -> App (Con c) <$> exprOfPattern p
+    PWild -> Nothing
 
 patternOfExpr :: Expr -> Maybe Pattern
 patternOfExpr = \case

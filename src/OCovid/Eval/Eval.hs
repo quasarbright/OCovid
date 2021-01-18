@@ -212,6 +212,7 @@ tryMatchCase c p rhs = do
 -- | if the value fits the pattern, return the pattern's bindings. Otherwise, fail.
 patternMatch :: Cell -> Pattern -> Interpreter Stack
 patternMatch c p = case (c,p) of
+    (_,PWild) -> return mempty
     (_,PVar x) -> return $ Map.singleton x c
     (CPtr addr, PTuple ps) -> boxedOfAddr addr >>= \case
         BTuple cs -> do
